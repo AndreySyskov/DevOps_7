@@ -1,0 +1,23 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+  Vagrant.configure("2") do |config|
+
+    config.vm.box = "ubuntu/jammy64"
+    config.vm.synced_folder "../services", "/mnt/services" # смонтировать папку services на хосте в папку на госте
+    config.vm.hostname = "worker" 
+
+    config.vm.provider "virtualbox" do |vb|
+      vb.name = "worker" 
+      vb.memory = "2048"  # 2 ГБ оперативной памяти
+      vb.cpus = 1     
+    end
+   
+    config.vm.provision "shell", inline: <<-SHELL
+
+      mkdir -p /home/vagrant/services
+      cp -r /mnt/services/* /home/vagrant/services/
+
+    SHELL
+  end
+
+  

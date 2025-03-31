@@ -1,0 +1,204 @@
+version: "3.8"
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - app-network
+
+  db:
+    image: postgres:16.2
+    restart: always
+    networks:
+      - app-network
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: postgres
+    volumes:
+      - ./services/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      #test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: >
+        bash -c '
+        psql -U postgres -d users_db -c "SELECT 1;" &&
+        psql -U postgres -d hotels_db -c "SELECT 1;" && 
+        psql -U postgres -d balances_db -c "SELECT 1;" &&
+        psql -U postgres -d reservations_db -c "SELECT 1;" &&
+        psql -U postgres -d payments_db -c "SELECT 1;" &&
+        psql -U postgres -d statistics_db -c "SELECT 1;"
+        '
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  booking-service:
+    restart: always
+    build: ./services/booking-service/
+    networks:
+      - app-network
+    ports:
+      - "8083:8083"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: reservations_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: guest
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
+  session-service:
+    restart: always
+    build: ./services/session-service/
+    networks:
+      - app-network
+    ports:
+      - "8081:8081"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: users_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  hotel-service:
+    restart: always
+    build: ./services/hotel-service/
+    networks:
+      - app-network
+    ports:
+      - "8082:8082"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: hotels_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  payment-service:
+    restart: always
+    build: ./services/payment-service/
+    networks:
+      - app-network
+    ports:
+      - "8084:8084"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: payments_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  loyalty-service:
+    restart: always
+    build: ./services/loyalty-service/
+    networks:
+      - app-network
+    ports:
+      - "8085:8085"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: balances_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  report-service:
+    restart: always
+    build: ./services/report-service/
+    networks:
+      - app-network
+    ports:
+      - "8086:8086"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: statistics_db
+      RABBIT_MQ_HOST: rabbitmq
+      RABBIT_MQ_PORT: 5672
+      RABBIT_MQ_USER: guest
+      RABBIT_MQ_PASSWORD: guest
+      RABBIT_MQ_QUEUE_NAME: messagequeue
+      RABBIT_MQ_EXCHANGE: messagequeue-exchange
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
+  gateway-service:
+    restart: always
+    build: ./services/gateway-service/
+    ports:
+      - "8087:8087"
+    networks:
+      - app-network
+    environment:
+      SESSION_SERVICE_HOST: session-service
+      SESSION_SERVICE_PORT: 8081
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      BOOKING_SERVICE_HOST: booking-service
+      BOOKING_SERVICE_PORT: 8083
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+      REPORT_SERVICE_HOST: report-service
+      REPORT_SERVICE_PORT: 8086
+    depends_on:
+      booking-service:
+        condition: service_started
+      hotel-service:
+        condition: service_started
+      session-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      loyalty-service:
+        condition: service_started
+      report-service:
+        condition: service_started
+
+networks:
+  app-network:
+
+volumes:
+  pg_data:
+
+

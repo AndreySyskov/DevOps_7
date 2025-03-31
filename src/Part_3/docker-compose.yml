@@ -1,0 +1,241 @@
+#version: "3.8"
+services:
+ rabbitmq:
+   image: rabbitmq:3-management-alpine
+   ports:
+     - "5672:5672"
+     - "15672:15672"
+   networks:
+     - app-network
+   deploy:
+     replicas: 1
+
+
+ db:
+   image: andreys21/postgres_16_2:1.0
+   restart: always
+   networks:
+     - app-network
+   ports:
+     - "5432:5432"
+   environment:
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: postgres
+   volumes:
+    
+     - pg_data:/var/lib/postgresql/data
+   healthcheck:
+     
+     test: >
+       bash -c '
+       psql -U postgres -d users_db -c "SELECT 1;" &&
+       psql -U postgres -d hotels_db -c "SELECT 1;" &&
+       psql -U postgres -d balances_db -c "SELECT 1;" &&
+       psql -U postgres -d reservations_db -c "SELECT 1;" &&
+       psql -U postgres -d payments_db -c "SELECT 1;" &&
+       psql -U postgres -d statistics_db -c "SELECT 1;"
+       '
+     interval: 10s
+     timeout: 10s
+     retries: 10
+   deploy:
+     replicas: 1
+
+
+ booking-service:
+   restart: always
+   image: andreys21/booking-service:latest
+   networks:
+     - app-network
+   ports:
+     - "8083:8083"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: reservations_db
+     RABBIT_MQ_HOST: rabbitmq
+     RABBIT_MQ_PORT: 5672
+     RABBIT_MQ_USER: guest
+     RABBIT_MQ_PASSWORD: guest
+     RABBIT_MQ_QUEUE_NAME: messagequeue
+     RABBIT_MQ_EXCHANGE: messagequeue-exchange
+     HOTEL_SERVICE_HOST: hotel-service
+     HOTEL_SERVICE_PORT: 8082
+     PAYMENT_SERVICE_HOST: payment-service
+     PAYMENT_SERVICE_PORT: 8084
+     LOYALTY_SERVICE_HOST: loyalty-service
+     LOYALTY_SERVICE_PORT: 8085
+   depends_on:
+     - db
+     - rabbitmq
+      
+   deploy:
+     replicas: 2
+
+
+ session-service:
+   restart: always
+   image: andreys21/session-service:latest
+   networks:
+     - app-network
+   #ports:
+   #  - "8081:8081"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: users_db
+   depends_on:
+     - db
+        
+   deploy:
+     replicas: 2
+
+
+ hotel-service:
+   image: andreys21/hotel-service:latest
+   restart: always
+  
+   networks:
+     - app-network
+   ports:
+     - "8082:8082"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: hotels_db
+   depends_on:
+     - db
+        
+   deploy:
+     replicas: 1
+
+
+ payment-service:
+   restart: always
+   image: andreys21/payment-service:latest
+   networks:
+     - app-network
+   ports:
+     - "8084:8084"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: payments_db
+   depends_on:
+     - db
+      
+   deploy:
+     replicas: 2
+
+
+ loyalty-service:
+   restart: always
+   image: andreys21/loyalty-service:latest
+   networks:
+     - app-network
+   ports:
+     - "8085:8085"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: balances_db
+   depends_on:
+     - db
+     
+   deploy:
+     replicas: 2
+
+
+ report-service:
+   image: andreys21/report-service:latest
+   restart: always
+  
+   networks:
+     - app-network
+   ports:
+     - "8086:8086"
+   environment:
+     POSTGRES_HOST: db
+     POSTGRES_PORT: 5432
+     POSTGRES_USER: postgres
+     POSTGRES_PASSWORD: "password"
+     POSTGRES_DB: statistics_db
+     RABBIT_MQ_HOST: rabbitmq
+     RABBIT_MQ_PORT: 5672
+     RABBIT_MQ_USER: guest
+     RABBIT_MQ_PASSWORD: guest
+     RABBIT_MQ_QUEUE_NAME: messagequeue
+     RABBIT_MQ_EXCHANGE: messagequeue-exchange
+   depends_on:
+     - db
+     - rabbitmq
+        
+   deploy:
+     replicas: 2
+
+
+ gateway-service:
+   restart: always
+   image: andreys21/gateway-service:latest
+   #ports:
+   #  - "8087:8087"
+   networks:
+     - app-network
+   environment:
+     SESSION_SERVICE_HOST: session-service
+     SESSION_SERVICE_PORT: 8081
+     HOTEL_SERVICE_HOST: hotel-service
+     HOTEL_SERVICE_PORT: 8082
+     BOOKING_SERVICE_HOST: booking-service
+     BOOKING_SERVICE_PORT: 8083
+     PAYMENT_SERVICE_HOST: payment-service
+     PAYMENT_SERVICE_PORT: 8084
+     LOYALTY_SERVICE_HOST: loyalty-service
+     LOYALTY_SERVICE_PORT: 8085
+     REPORT_SERVICE_HOST: report-service
+     REPORT_SERVICE_PORT: 8086
+   depends_on:
+     - booking-service
+     - hotel-service
+     - session-service
+     - payment-service
+     - loyalty-service
+     - report-service
+   deploy:
+     replicas: 2
+
+ nginx:
+   image: nginx:1.25.5-alpine
+   restart: always
+   networks:
+     - app-network
+   ports:
+    - "8081:8081"
+    - "8087:8087"
+   volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+   depends_on:
+     - session-service
+   deploy:
+     replicas: 1
+
+
+networks:
+ app-network:
+   driver: overlay
+
+
+volumes:
+ pg_data:
+   driver: local
